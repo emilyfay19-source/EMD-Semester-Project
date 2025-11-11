@@ -95,7 +95,7 @@ void loop() {
     }
     IrReceiver.resume();
   }
-
+  
   // --- State Machine ---
   switch (currentState) {
     case IDLE:
@@ -111,22 +111,10 @@ void loop() {
 
     case GATHER_DISTANCE:
       Gather_Distances();
-      if (Front_Distance < Wall_Distance)
-        currentState = OBSTACLE_AVOID;
+      if (Front_Distance <= 50)
+        currentState = GET_CLOSE;
       else
         currentState = WALL_FOLLOW;
-      break;
-
-    case WALL_FOLLOW:
-      Serial.println("Following Wall...");
-      Car_To_Wall_Position();
-      currentState = GATHER_DISTANCE;
-      break;
-
-    case OBSTACLE_AVOID:
-      Serial.println("Avoiding Obstacle...");
-      Obstacle_Avoiding();
-      currentState = GATHER_DISTANCE;
       break;
 
     case GET_CLOSE:
@@ -135,9 +123,23 @@ void loop() {
       currentState = OBSTACLE_AVOID;
       break;
 
+    case OBSTACLE_AVOID:
+      Serial.println("Avoiding Obstacle...");
+      Obstacle_Avoiding();
+      currentState = GATHER_DISTANCE;
+      break;
+
+    case WALL_FOLLOW:
+      Serial.println("Following Wall...");
+      Car_To_Wall_Position();
+      currentState = GATHER_DISTANCE;
+      break;
+
     case STOP:
       stopp();
+      digitalWrite(LED_PIN, LOW);
       if (carOn) currentState = INITIALIZE; // resume when toggled ON
+        digitalWrite(LED_PIN, HIGH);
       break;
 
     default:
@@ -148,11 +150,7 @@ void loop() {
 }
 
 
-
-// ===================================================
-
-// ========== ULTRASONIC FUNCTIONS ===================
-
+// Converting the ultrasonic sensors into cm
 long checkdistance() {
   long duration;
   digitalWrite(Trig_Pin, LOW);
@@ -166,77 +164,60 @@ long checkdistance() {
   return distance;
 }
 
-void Car_To_Wall_Position() {
-  if (Wall_Distance > 20) {
-    Serial.println("Obstacle Not Detected");
-    rotate_left(150);
-    delay(500);
-    go_forward(100);
-    delay(500);
-    }
-  else if (Wall_Distance < 20) {
-    rotate_right(150);
-    delay(200);
-    go_forward(100);
-    delay(500);
-    }
-  else if (Wall_Distance == 20) {
-    go_forward(100);
-    delay(500);
-  }
-}
 
-
-// Functions for each switch case
 void Gather_Distances() {
+
+// Get the front distance
 Serial.println("Checking Distance: Gather_Distances()");
-stopp();
 delay(300);
 myservo.write(90);
 delay(500);
 Front_Distance = checkdistance();
 Serial.println(Front_Distance);
+
+//Front distance correction if it times out, it backs up and tries to get another reading
 if (Front_Distance > 250) {
   go_backward(100);
   delay(300);
+  stopp();
   myservo.write(90);
   delay(300);
   Front_Distance = checkdistance();
   delay(300);
-  Obstacle_Avoiding();
-  stopp();
+  // If the new reading still is not accurate then it'll just assume the car is stuck
+  if (Front_Distance > 250){
+    Obstacle_Avoiding()
+  }
+  static_friction();
 }
+
+
+// getting the wall distance 
 delay(300);
 myservo.write(180);
 delay(500);
 Wall_Distance = checkdistance();
+
+// Wall reading correction same as above
 if (Wall_Distance > 250) {
   go_backward(100);
   delay(300);
+  stopp();
   myservo.write(180);
   delay(300);
   Wall_Distance = checkdistance();
   delay(300);
-  Obstacle_Avoiding();
-  stopp();
+
+  //// Wall reading correction same as above
+    if (Wall_Distance > 250){
+      Obstacle_Avoiding()
+  }
+  static_friction();
 }
+
 Serial.println(Wall_Distance);
 delay(300);
-static_friction();
 }
-
-
-
-void obstacle_detected() {
-  myservo.write(90);
-  Serial.println("Obstacle Detected");
-  stopp();
-  Serial.println("Step1");
-  get_close();
-  stopp();
-  Obstacle_Avoiding();
-}
-
 
 void get_close() {
 Front_Distance = checkdistance();
@@ -259,7 +240,6 @@ if (Front_Distance <= 5){
   stopp(); 
   delay(500);
 }
-
 
 // Look left
 myservo.write(190);
@@ -287,6 +267,26 @@ delay(400);
 myservo.write(90); // Recenter after turning
 Serial.println("Obstacle avoided successfully");
 }
+
+
+
+
+void Car_To_Wall_Position() {
+  if (Wall_Distance >= 20) {
+    Serial.println("Obstacle Not Detected");
+    rotate_left(150);
+    delay(500);
+    go_forward(100);
+    delay(500);
+    }
+  else if (Wall_Distance <= 20) {
+    rotate_right(150);
+    delay(500);
+    go_forward(100);
+    delay(500);
+    }
+}
+
 
 // This is to overcome the wheels getting stuck
 void static_friction() {
@@ -345,6 +345,9 @@ digitalWrite(pinRF, HIGH);
 digitalWrite(pinLB, HIGH);
 digitalWrite(pinLF, HIGH);
 }
+
+
+
 
 
 
