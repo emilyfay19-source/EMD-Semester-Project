@@ -111,7 +111,7 @@ void loop() {
 
     case GATHER_DISTANCE:
       Gather_Distances();
-      if (Front_Distance <= 50)
+      if (Front_Distance <= 80)
         currentState = GET_CLOSE;
       else
         currentState = WALL_FOLLOW;
@@ -166,7 +166,7 @@ long checkdistance() {
 
 
 void Gather_Distances() {
-
+stopp();
 // Get the front distance
 Serial.println("Checking Distance: Gather_Distances()");
 delay(300);
@@ -186,16 +186,15 @@ if (Front_Distance > 250) {
   delay(300);
   // If the new reading still is not accurate then it'll just assume the car is stuck
   if (Front_Distance > 250){
-    Obstacle_Avoiding()
+    Obstacle_Avoiding();
   }
-  static_friction();
 }
 
 
 // getting the wall distance 
 delay(300);
 myservo.write(180);
-delay(500);
+delay(300);
 Wall_Distance = checkdistance();
 
 // Wall reading correction same as above
@@ -210,17 +209,20 @@ if (Wall_Distance > 250) {
 
   //// Wall reading correction same as above
     if (Wall_Distance > 250){
-      Obstacle_Avoiding()
+      Obstacle_Avoiding();
   }
-  static_friction();
 }
 
 Serial.println(Wall_Distance);
 delay(300);
+static_friction();
 }
+
+
 
 void get_close() {
 Front_Distance = checkdistance();
+myservo.write(90);
   while (Front_Distance >= 20) {
   go_forward(80);
   Front_Distance = checkdistance();
