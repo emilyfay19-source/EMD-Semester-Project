@@ -23,9 +23,16 @@ bool carOn = false; // Toggle state
 // ====== Distance variables ======
 volatile int Front_Distance, Left_Distance, Right_Distance,Wall_Distance;
 
+// ====== STUCK DETECTION VARIABLES ======
+unsigned long lastStateChangeTime = 0;
+const long STUCK_TIMEOUT = 3000; // 10 seconds without a state change triggers recovery
+// ===================================================
+
 // ====== Function declarations ======
 long distance;
 long checkdistance();
+void Sensor_Issue();
+void Unstuck_Recovery();
 void Car_To_Wall_Position(); // Checks for obstacle, and if its not detected it'll follow the wall
 void Obstacle_Avoiding();
 void Gather_Distances(); // Gathers wall and front distance interchanging
@@ -46,11 +53,12 @@ enum State {
   WALL_FOLLOW,
   OBSTACLE_AVOID,
   GET_CLOSE,
+  UNSTUCK_ROUTINE,
   STOP
 };
 
 State currentState = IDLE;
-
+void changeState(State newState);
 
 // ===================================================
 // ========== SETUP ==================================
@@ -91,11 +99,18 @@ void loop() {
     if (value == ONOFF_BUTTON) {
       carOn = !carOn;
       digitalWrite(LED_PIN, carOn ? HIGH : LOW);
-      currentState = carOn ? INITIALIZE : STOP;
+      // This line was the problem. It is now correctly calling the function:
+      changeState(carOn ? INITIALIZE : STOP);
     }
     IrReceiver.resume();
   }
-  
+
+  // --- STUCK CHECK (NEW) --- (This must come next)
+  if (carOn && currentState != IDLE && currentState != STOP && (millis() - lastStateChangeTime > STUCK_TIMEOUT))
+  {
+    changeState(UNSTUCK_ROUTINE);
+  }
+
   // --- State Machine ---
   switch (currentState) {
     case IDLE:
@@ -106,45 +121,52 @@ void loop() {
       Serial.println("Initializing Car...");
       stopp();
       delay(300);
-      currentState = GATHER_DISTANCE;
+     changeState(GATHER_DISTANCE);
       break;
 
     case GATHER_DISTANCE:
       Gather_Distances();
       if (Front_Distance <= 80)
-        currentState = GET_CLOSE;
+       changeState(GET_CLOSE);
       else
-        currentState = WALL_FOLLOW;
+       changeState(WALL_FOLLOW);
       break;
 
     case GET_CLOSE:
       Serial.println("Getting Close...");
       get_close();
-      currentState = OBSTACLE_AVOID;
+     changeState(OBSTACLE_AVOID);
       break;
 
     case OBSTACLE_AVOID:
       Serial.println("Avoiding Obstacle...");
       Obstacle_Avoiding();
-      currentState = GATHER_DISTANCE;
+      changeState(GATHER_DISTANCE);
       break;
 
     case WALL_FOLLOW:
       Serial.println("Following Wall...");
       Car_To_Wall_Position();
-      currentState = GATHER_DISTANCE;
+      changeState(GATHER_DISTANCE); // Make sure you use 'changeState' here!
       break;
+
+    case UNSTUCK_ROUTINE: // NEW CASE: If stuck for too long
+      Serial.println("Executing Unstuck Recovery Wiggle...");
+      Unstuck_Recovery();
+      changeState(GATHER_DISTANCE); // After recovery, try gathering distances again
+      break;
+
 
     case STOP:
       stopp();
       digitalWrite(LED_PIN, LOW);
-      if (carOn) currentState = INITIALIZE; // resume when toggled ON
+      if (carOn)  changeState(INITIALIZE); // resume when toggled ON
         digitalWrite(LED_PIN, HIGH);
       break;
 
     default:
       stopp();
-      currentState = IDLE;
+     changeState(IDLE);
       break;
   }
 }
@@ -177,15 +199,18 @@ Serial.println(Front_Distance);
 
 //Front distance correction if it times out, it backs up and tries to get another reading
 if (Front_Distance > 250) {
-  go_backward(100);
-  delay(300);
+  Sensor_Issue();
+  go_backward(200);
+  delay(500);
   stopp();
   myservo.write(90);
   delay(300);
   Front_Distance = checkdistance();
   delay(300);
   // If the new reading still is not accurate then it'll just assume the car is stuck
+
   if (Front_Distance > 250){
+    Sensor_Issue();
     Obstacle_Avoiding();
   }
 }
@@ -199,8 +224,9 @@ Wall_Distance = checkdistance();
 
 // Wall reading correction same as above
 if (Wall_Distance > 250) {
-  go_backward(100);
-  delay(300);
+  Sensor_Issue();
+  go_backward(200);
+  delay(500);
   stopp();
   myservo.write(180);
   delay(300);
@@ -208,7 +234,8 @@ if (Wall_Distance > 250) {
   delay(300);
 
   //// Wall reading correction same as above
-    if (Wall_Distance > 250){
+    if (Wall_Distance > 250) {
+      Sensor_Issue();
       Obstacle_Avoiding();
   }
 }
@@ -236,8 +263,8 @@ void Obstacle_Avoiding() {
 stopp();
 delay(500);
 Front_Distance = checkdistance();
-if (Front_Distance <= 5){
-  go_backward(150);
+if (Front_Distance <= 10){
+  go_backward(200);
   delay(500);
   stopp(); 
   delay(500);
@@ -258,11 +285,11 @@ delay(500);
 // Decide direction
 if (Left_Distance > Right_Distance) {
 rotate_left(200);
-delay(500);
+delay(800);
 } 
 else {
 rotate_right(200);
-delay(500);
+delay(800);
 }
 
 delay(400);
@@ -279,13 +306,13 @@ void Car_To_Wall_Position() {
     rotate_left(150);
     delay(500);
     go_forward(100);
-    delay(500);
+    delay(1000);
     }
   else if (Wall_Distance <= 20) {
     rotate_right(150);
     delay(500);
     go_forward(100);
-    delay(500);
+    delay(1000);
     }
 }
 
@@ -298,6 +325,45 @@ go_forward(75);
 delay(300);
 }
 
+
+void Sensor_Issue() {
+digitalWrite(LED_PIN, LOW);
+delay(200);
+digitalWrite(LED_PIN, HIGH);
+delay(200);
+digitalWrite(LED_PIN, LOW);
+delay(200);
+digitalWrite(LED_PIN, HIGH);
+delay(200);
+digitalWrite(LED_PIN, LOW);
+delay(200);
+digitalWrite(LED_PIN, HIGH);
+}
+
+void changeState(State newState) {
+  currentState = newState;
+  lastStateChangeTime = millis(); // Reset the stuck timer every time the state changes
+}
+
+void Unstuck_Recovery() {
+  stopp();
+  Sensor_Issue(); 
+  delay(500);
+  
+  // 1. Back up aggressively
+  go_backward(255);
+  delay(1000); // 1 second
+  stopp();
+  delay(200);
+
+  // 2. Rotate sharply to change position
+  rotate_left(200);
+  delay(1000); // 1 second
+  stopp();
+  delay(500);
+  
+  Serial.println("Unstuck Routine Complete. Re-evaluating.");
+}
 
 // ===================================================
 // ========== MOTOR CONTROL ==========================
